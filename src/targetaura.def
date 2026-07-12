@@ -1,0 +1,5 @@
+LIBRARY "targetaura"
+EXPORTS
+	expCreatePlugin
+	expGetInterfaceVersion
+	expDestroyPlugin

@@ -1,0 +1,13 @@
+# Build artifacts
+*.obj
+*.exp
+*.lib
+*.pdb
+*.ilk
+
+# Local staging / backups
+release/
+*.bak
+
+# Keep targetaura.dll committed (drop-in binary). Remove the line below to exclude it.
+!targetaura.dll

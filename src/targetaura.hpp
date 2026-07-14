@@ -37,6 +37,8 @@ class targetaura final : public IPlugin
     int   m_GateSpan;     // +/- words scanned around the centre (tight window kills stale-pointer bleed)
     float m_Intensity;    // colour multiplier
     float m_Scale;        // enlargement factor (aura thickness)
+    bool  m_DistScale;    // grow the aura with target distance so it stays visible far away
+    float m_DistBoost;    // thickness multiplier reached at the far end of the ramp (1 = no growth)
     bool  m_Pulse;
     float m_PulseSpeed;
     float m_PulseAmount;
@@ -69,6 +71,7 @@ class targetaura final : public IPlugin
     // Per-frame target state (D3D world coords; y = up).
     bool     m_HasTarget;
     float    m_TgtX, m_TgtY, m_TgtZ;
+    float    m_TgtYMid;      // vertical scale anchor at mid-model height (feet anchor displaces the top)
     uint32_t m_TgtColor;     // packed 0x00RRGGBB, intensity + pulse already applied
     float    m_ActiveScale;  // aura thickness used this frame (special or normal)
     bool     m_TgtSpecial;   // target is an NM / watchlist match this frame

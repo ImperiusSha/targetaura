@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#define TARGETAURA_VERSION 1.0
+#define TARGETAURA_VERSION 1.1
 
 // Halo save/restore: 0 = lean recorded state block (only the states DrawHalo touches); 1 = full
 // D3DSBT_ALL (heavier but maximally safe). Flip to 1 if the lean path ever shows texture artifacts.
@@ -160,6 +160,8 @@ targetaura::targetaura(void)
     , m_GateSpan(48)
     , m_Intensity(0.30f)
     , m_Scale(1.020f)
+    , m_DistScale(true)
+    , m_DistBoost(2.0f)
     , m_Pulse(true)
     , m_PulseSpeed(3.0f)
     , m_PulseAmount(1.00f)
@@ -407,6 +409,8 @@ void targetaura::SaveSettings(void)
     fprintf(f, "gateSpan=%d\n",      this->m_GateSpan);
     fprintf(f, "intensity=%.4f\n",   this->m_Intensity);
     fprintf(f, "scale=%.4f\n",       this->m_Scale);
+    fprintf(f, "distScale=%d\n",     this->m_DistScale ? 1 : 0);
+    fprintf(f, "distBoost=%.4f\n",   this->m_DistBoost);
     fprintf(f, "pulse=%d\n",         this->m_Pulse ? 1 : 0);
     fprintf(f, "pulseSpeed=%.4f\n",  this->m_PulseSpeed);
     fprintf(f, "pulseAmount=%.4f\n", this->m_PulseAmount);
@@ -453,6 +457,8 @@ void targetaura::LoadSettings(void)
         else if (_stricmp(key, "gateSpan")     == 0) this->m_GateSpan     = atoi(val);
         else if (_stricmp(key, "intensity")    == 0) this->m_Intensity    = static_cast<float>(atof(val));
         else if (_stricmp(key, "scale")        == 0) this->m_Scale        = static_cast<float>(atof(val));
+        else if (_stricmp(key, "distScale")    == 0) this->m_DistScale    = atoi(val) != 0;
+        else if (_stricmp(key, "distBoost")    == 0) this->m_DistBoost    = static_cast<float>(atof(val));
         else if (_stricmp(key, "pulse")        == 0) this->m_Pulse        = atoi(val) != 0;
         else if (_stricmp(key, "pulseSpeed")   == 0) this->m_PulseSpeed   = static_cast<float>(atof(val));
         else if (_stricmp(key, "pulseAmount")  == 0) this->m_PulseAmount  = static_cast<float>(atof(val));
@@ -571,6 +577,14 @@ void targetaura::Direct3DBeginScene(bool isRenderingBackBuffer)
     this->m_TgtY = z;
     this->m_TgtZ = y;
 
+    // Scale about mid-model height, not the feet: with a feet anchor the shell drifts upward the further
+    // a part sits above the ground (shoulders, weapon on the back). The vertical axis grows downward, so
+    // "up" is minus. GetModelSize is a rough size proxy -- clamp it into a sane range.
+    float h = ent->GetModelSize(idx);
+    if (h < 0.5f || h > 10.0f)
+        h = 1.6f;
+    this->m_TgtYMid = z - h * 0.5f;
+
     // Resolve category + special (NM / watchlist) status, then build the aura colour.
     const int   cat = this->ResolveCategory(idx);
     const char* nm  = ent->GetName(idx);
@@ -598,6 +612,17 @@ void targetaura::Direct3DBeginScene(bool isRenderingBackBuffer)
         mul = this->m_Intensity;
         if (this->m_Pulse)
             mul *= (1.0f - this->m_PulseAmount) + this->m_PulseAmount * (0.5f + 0.5f * sinf(t * this->m_PulseSpeed));
+    }
+
+    // Distance scaling: a thin rim vanishes on far-away targets, so grow the thickness with distance.
+    // No boost up to 5y, then ramp linearly to the full boost at 35y (GetDistance returns the square).
+    if (this->m_DistScale && this->m_DistBoost > 1.0f)
+    {
+        const float d = sqrtf(ent->GetDistance(idx));
+        float f = (d - 5.0f) / 30.0f;
+        f = (f < 0.0f) ? 0.0f : (f > 1.0f) ? 1.0f : f;
+        const float boost = 1.0f + (this->m_DistBoost - 1.0f) * f;
+        this->m_ActiveScale = 1.0f + (this->m_ActiveScale - 1.0f) * boost;
     }
 
     // Two-colour pulse: cycle the colour between the base colour and the configured 2nd colour.
@@ -724,7 +749,7 @@ void targetaura::DrawHalo(D3DPRIMITIVETYPE type, UINT minIndex, UINT numVertices
             memset(&m, 0, sizeof(m));
             m._11 = scale; m._22 = scale; m._33 = scale; m._44 = 1.0f;
             m._41 = this->m_TgtX * (1.0f - scale);
-            m._42 = this->m_TgtY * (1.0f - scale);
+            m._42 = this->m_TgtYMid * (1.0f - scale);   // vertical anchor at mid-height, not the feet
             m._43 = this->m_TgtZ * (1.0f - scale);
 
             const uint32_t a = static_cast<uint32_t>(alpha * 255.0f + 0.5f);
@@ -841,7 +866,7 @@ void targetaura::RenderUI(void)
         g->Text("TARGET AURA");
         g->PopStyleColor(1);
         g->SameLine(0.0f, 10.0f);
-        g->TextColored(muted, "v1.0");
+        g->TextColored(muted, "v1.1");
         g->SameLine(0.0f, 12.0f);
         if (this->m_HasTarget && this->m_TgtSpecial)
             g->TextColored(gold, "[SPECIAL: %u]", this->m_LastMeshes);
@@ -876,6 +901,13 @@ void targetaura::RenderUI(void)
             g->SliderFloat("Sweep width", &this->m_SweepWidth, 0.02f, 0.50f, "%.2f");
         }
         g->SliderFloat("Thickness", &this->m_Scale, 1.005f, 1.30f, "%.3f");
+        g->Checkbox("Scale with distance", &this->m_DistScale);
+        if (this->m_DistScale)
+        {
+            g->SameLine(0.0f, 10.0f);
+            g->TextColored(muted, "thicker when far away");
+            g->SliderFloat("Distance boost", &this->m_DistBoost, 1.0f, 4.0f, "%.2fx");
+        }
         g->SliderFloat("Intensity", &this->m_Intensity, 0.0f, 1.5f, "%.2f");
 
         if (g->CollapsingHeader("Animation", 0))
